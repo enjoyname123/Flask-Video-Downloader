@@ -71,7 +71,7 @@ def download_hook(d):
 def download_video(url, quality, download_subs, mode='video'):
     global last_video_filename
     try:
-        # Strict TV_SIMPLY setup. Completely skips desktop/mobile bot verification.
+        # High-compatibility mobile safari footprint that skips PO Token enforcement
         base_opts = {
             'progress_hooks': [download_hook],
             'quiet': False,
@@ -81,9 +81,16 @@ def download_video(url, quality, download_subs, mode='video'):
             'cache_dir': os.path.join(REPO_ROOT, ".yt-dlp-cache"),
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['tv_simply'],
-                    'player_skip': ['web', 'ios', 'mweb', 'android'],
+                    'player_client': ['web_safari'],
+                    'player_skip': ['web', 'ios', 'mweb', 'android', 'tv'],
                 }
+            },
+            # Inject generic, safe HTTP headers to mirror a real device completely
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Sec-Fetch-Mode': 'navigate',
             }
         }
 
@@ -137,17 +144,18 @@ def download_video(url, quality, download_subs, mode='video'):
             except Exception:
                 requested_int = None
 
-            # Sub-probe configurations matching strict TV pipeline endpoints
+            # Explicit sub-probe matching the exact same network footprint
             probe_opts = {
                 'quiet': True,
                 'no_warnings': True,
                 'cache_dir': os.path.join(REPO_ROOT, ".yt-dlp-cache"),
                 'extractor_args': {
                     'youtube': {
-                        'player_client': ['tv_simply'],
-                        'player_skip': ['web', 'ios', 'mweb', 'android'],
+                        'player_client': ['web_safari'],
+                        'player_skip': ['web', 'ios', 'mweb', 'android', 'tv'],
                     }
-                }
+                },
+                'http_headers': base_opts['http_headers']
             }
             with yt_dlp.YoutubeDL(probe_opts) as ydl_probe:
                 info = ydl_probe.extract_info(url, download=False)
@@ -217,6 +225,7 @@ def download_video(url, quality, download_subs, mode='video'):
             progress['status'] = "Error"
             progress['done'] = True
             progress['error'] = str(e)
+            
 
 @app.route("/", methods=["GET", "POST"])
 def index():
