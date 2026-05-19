@@ -50,7 +50,7 @@ last_video_filename = None
 def safe_filename(filename):
     value = unicodedata.normalize('NFKD', filename).encode('ascii', 'ignore').decode('ascii')
     value = str(re.sub(r'[^A-Za-z0-9_.-]', '_', value))
-    return value[:100]  # Limit length for filesystem safety
+    return value[:100]
 
 def download_hook(d):
     with progress_lock:
@@ -97,123 +97,37 @@ def download_video(url, quality, download_subs, mode='video', cookies_path=None)
     try:
         effective_cookies = get_effective_cookies_path(cookies_path)
 
-        # High-compatibility mobile safari footprint that skips PO Token enforcement
-        base_opts = {
+        # Standard, clean options relying completely on cookies for auth
+        ydl_opts = {
             'progress_hooks': [download_hook],
             'quiet': False,
             'no_warnings': False,
             'progress_with_newline': False,
-            'ignoreerrors': True,
+            'ignoreerrors': False,
             'cache_dir': os.path.join(REPO_ROOT, ".yt-dlp-cache"),
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['web_safari'],
-                    'player_skip': ['web', 'ios', 'mweb', 'android', 'tv'],
-                }
-            },
-            # Inject generic, safe HTTP headers to mirror a real device completely
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Sec-Fetch-Mode': 'navigate',
-            }
         }
 
-        # Apply cookies if available using correct API parameter
         if effective_cookies:
-            base_opts['cookiefile'] = effective_cookies
+            ydl_opts['cookiefile'] = effective_cookies
 
         if mode == 'audio':
-            base_opts['outtmpl'] = os.path.join(DOWNLOADS_DIR, '%%(title)s.%%(ext)s')
-            base_opts['format'] = 'bestaudio/best'
-            base_opts['postprocessors'] = [{
+            ydl_opts['outtmpl'] = os.path.join(DOWNLOADS_DIR, '%(title)s.%(ext)s')
+            ydl_opts['format'] = 'bestaudio/best'
+            ydl_opts['postprocessors'] = [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
                 'preferredquality': '192',
             }]
             download_subs = False  
         else:
-            base_opts['outtmpl'] = os.path.join(DOWNLOADS_DIR, '%(title)s.%(ext)s')
-            base_opts['merge_output_format'] = 'mp4'
-
-        with progress_lock:
-            progress['quality_requested'] = quality
-            progress['mode'] = mode
-
-        os.makedirs(DOWNLOADS_DIR, exist_ok=True)
-
-        if mode == 'audio':
-            with progress_lock:
-                progress['quality_used'] = 'Best Available'
-                progress['status'] = 'Extracting best audio...'
-
-            with yt_dlp.YoutubeDL(base_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                actual_filename = ydl.prepare_filename(info)
-                audio_filename = os.path.splitext(actual_filename)[0] + '.mp3'
-
-                if os.path.exists(audio_filename):
-                    last_video_filename = audio_filename
-                    with progress_lock:
-                        progress['filename'] = os.path.basename(last_video_filename)
-                else:
-                    title = info.get('title', 'audio')
-                    safe_title = safe_filename(title)
-                    files = [f for f in os.listdir(DOWNLOADS_DIR) if f.startswith(safe_title) and f.endswith('.mp3')]
-                    if files:
-                        last_video_filename = os.path.join(DOWNLOADS_DIR, files[0])
-                        with progress_lock:
-                            progress['filename'] = os.path.basename(last_video_filename)
-                    else:
-                        last_video_filename = None
-        else:
-            requested_int = None
-            try:
-                requested_int = int(quality) if quality is not None else None
-            except Exception:
-                requested_int = None
-
-            # Explicit sub-probe matching the exact same network footprint
-            probe_opts = {
-                'quiet': True,
-                'no_warnings': True,
-                'cache_dir': os.path.join(REPO_ROOT, ".yt-dlp-cache"),
-                'extractor_args': {
-                    'youtube': {
-                        'player_client': ['web_safari'],
-                        'player_skip': ['web', 'ios', 'mweb', 'android', 'tv'],
-                    }
-                },
-                'http_headers': base_opts['http_headers']
-            }
+            ydl_opts['outtmpl'] = os.path.join(DOWNLOADS_DIR, '%(title)s.%(ext)s')
+            ydl_opts['merge_output_format'] = 'mp4'
             
-            if effective_cookies:
-                probe_opts['cookiefile'] = effective_cookies
-
-            with yt_dlp.YoutubeDL(probe_opts) as ydl_probe:
-                info = ydl_probe.extract_info(url, download=False)
-
-            formats = info.get('formats', []) if info else []
-            available_heights = sorted({f.get('height') for f in formats if f.get('height')}, reverse=True)
-
-            chosen_height = None
-            if requested_int is not None and available_heights:
-                for h in available_heights:
-                    if h <= requested_int:
-                        chosen_height = h
-                        break
-
-            if chosen_height is None and available_heights:
-                chosen_height = available_heights[0]
-
-            if chosen_height:
-                format_selector = f"bestvideo[height<={chosen_height}]+bestaudio/best[height<={chosen_height}]"
+            # Format handling based on resolution request
+            if quality and quality.isdigit():
+                ydl_opts['format'] = f"bestvideo[height<={quality}]+bestaudio/best[height<={quality}]"
             else:
-                format_selector = 'bestvideo+bestaudio/best'
-
-            ydl_opts = base_opts.copy()
-            ydl_opts['format'] = format_selector
+                ydl_opts['format'] = 'bestvideo+bestaudio/best'
 
             if download_subs:
                 ydl_opts.update({
@@ -223,29 +137,31 @@ def download_video(url, quality, download_subs, mode='video', cookies_path=None)
                     'embedsubtitles': True,
                 })
 
-            with progress_lock:
-                progress['quality_used'] = str(chosen_height) if chosen_height else 'best'
-                progress['status'] = f"Selected quality: {progress['quality_used']}p (requested: {quality})"
+        with progress_lock:
+            progress['quality_requested'] = quality
+            progress['quality_used'] = quality if quality else 'best'
+            progress['mode'] = mode
+            progress['status'] = 'Extracting and downloading...'
 
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                actual_filename = ydl.prepare_filename(info)
-                video_filename = os.path.splitext(actual_filename)[0] + '.mp4'
+        os.makedirs(DOWNLOADS_DIR, exist_ok=True)
 
-                if os.path.exists(video_filename):
-                    last_video_filename = video_filename
-                    with progress_lock:
-                        progress['filename'] = os.path.basename(last_video_filename)
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            actual_filename = ydl.prepare_filename(info)
+            
+            ext = 'mp3' if mode == 'audio' else 'mp4'
+            final_filename = os.path.splitext(actual_filename)[0] + f'.{ext}'
+
+            if os.path.exists(final_filename):
+                last_video_filename = final_filename
+            else:
+                title = info.get('title', 'file')
+                safe_title = safe_filename(title)
+                files = [f for f in os.listdir(DOWNLOADS_DIR) if f.startswith(safe_title) and f.endswith(f'.{ext}')]
+                if files:
+                    last_video_filename = os.path.join(DOWNLOADS_DIR, files[0])
                 else:
-                    title = info.get('title', 'video')
-                    safe_title = safe_filename(title)
-                    files = [f for f in os.listdir(DOWNLOADS_DIR) if f.startswith(safe_title) and f.endswith('.mp4')]
-                    if files:
-                        last_video_filename = os.path.join(DOWNLOADS_DIR, files[0])
-                        with progress_lock:
-                            progress['filename'] = os.path.basename(last_video_filename)
-                    else:
-                        last_video_filename = None
+                    last_video_filename = None
 
         with progress_lock:
             progress['status'] = 'Completed!'
