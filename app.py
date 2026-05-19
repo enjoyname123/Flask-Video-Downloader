@@ -71,7 +71,7 @@ def download_hook(d):
 def download_video(url, quality, download_subs, mode='video'):
     global last_video_filename
     try:
-        # Core configuration forcing OAuth2 over the embedded web client profile
+        # Force a combination of mobile-embedded flags to trick the bot detection
         base_opts = {
             'progress_hooks': [download_hook],
             'quiet': False,
@@ -82,7 +82,8 @@ def download_video(url, quality, download_subs, mode='video'):
             'extractor_args': {
                 'youtube': {
                     'oauth2': True,
-                    'player_client': ['web_embedded'],
+                    'player_client': ['mweb'], # Switch to mobile web footprint
+                    'player_skip': ['web'],    # Strictly block desktop web client
                 }
             }
         }
@@ -137,7 +138,7 @@ def download_video(url, quality, download_subs, mode='video'):
             except Exception:
                 requested_int = None
 
-            # Sub-probe configurations matching identical profile fingerprints
+            # Sub-probe configurations matching mobile layout signatures
             probe_opts = {
                 'quiet': True,
                 'no_warnings': True,
@@ -145,7 +146,8 @@ def download_video(url, quality, download_subs, mode='video'):
                 'extractor_args': {
                     'youtube': {
                         'oauth2': True,
-                        'player_client': ['web_embedded'],
+                        'player_client': ['mweb'],
+                        'player_skip': ['web'],
                     }
                 }
             }
