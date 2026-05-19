@@ -73,12 +73,15 @@ def download_video(url, quality, download_subs, mode='video'):
     global last_video_filename
     try:
         # Client spoofing options designed to emulate systems that do not use web cookies
+
         probe_opts = {
             'quiet': True,
             'no_warnings': True,
+            'impersonate': 'chrome',  # Spoofs a real browser TLS fingerprint
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['android_tv_embedded', 'web_safari']
+                    'player_client': ['android_embedded', 'web_embedded'],
+                    'skip': ['authcheck']
                 }
             }
         }
@@ -91,9 +94,13 @@ def download_video(url, quality, download_subs, mode='video'):
             'ignoreerrors': True,
             'remote_components': 'ejs:github',
             'javascript_runtimes': ['node'],
+            'impersonate': 'chrome',  # Spoofs a real browser TLS fingerprint
+            
+            # Forces yt-dlp to download via native media formats that do not trigger web bot challenges
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['android_tv_embedded', 'web_safari']
+                    'player_client': ['android_embedded', 'web_embedded'],
+                    'skip': ['authcheck']
                 }
             }
         }
