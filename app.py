@@ -1,4 +1,4 @@
-import os
+\import os
 import threading
 import unicodedata
 import re
@@ -7,7 +7,6 @@ import yt_dlp
 
 app = Flask(__name__)
 REPO_ROOT = os.path.abspath(os.path.dirname(__file__))
-# Creates a 'downloads' folder right inside your project directory
 DOWNLOADS_DIR = os.path.join(REPO_ROOT, "downloads") 
 
 progress = {
@@ -72,15 +71,14 @@ def download_hook(d):
 def download_video(url, quality, download_subs, mode='video'):
     global last_video_filename
     try:
-        # Client spoofing options designed to emulate systems that do not use web cookies
-
+        # Implements modern client impersonation mimicking official mobile hardware API streams
         probe_opts = {
             'quiet': True,
             'no_warnings': True,
-            'impersonate': 'chrome',  # Spoofs a real browser TLS fingerprint
+            'impersonate': 'safari-ios',  # High priority native iOS networking signature
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['android_embedded', 'web_embedded'],
+                    'player_client': ['ios'],
                     'skip': ['authcheck']
                 }
             }
@@ -94,12 +92,10 @@ def download_video(url, quality, download_subs, mode='video'):
             'ignoreerrors': True,
             'remote_components': 'ejs:github',
             'javascript_runtimes': ['node'],
-            'impersonate': 'chrome',  # Spoofs a real browser TLS fingerprint
-            
-            # Forces yt-dlp to download via native media formats that do not trigger web bot challenges
+            'impersonate': 'safari-ios',  # Match the iOS network handshake
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['android_embedded', 'web_embedded'],
+                    'player_client': ['ios'],
                     'skip': ['authcheck']
                 }
             }
@@ -114,19 +110,17 @@ def download_video(url, quality, download_subs, mode='video'):
                 'preferredcodec': 'mp3',
                 'preferredquality': '192',
             }]
-            download_subs = False  # No subtitles for audio
+            download_subs = False  
         else:
             base_opts['outtmpl'] = os.path.join(DOWNLOADS_DIR, '%(title)s.%(ext)s')
             base_opts['merge_output_format'] = 'mp4'
 
-        # Record requested quality in progress
         with progress_lock:
             progress['quality_requested'] = quality
             progress['mode'] = mode
 
         os.makedirs(DOWNLOADS_DIR, exist_ok=True)
 
-        # For audio mode, skip quality selection (not applicable)
         if mode == 'audio':
             with progress_lock:
                 progress['quality_used'] = 'Best Available'
@@ -142,7 +136,6 @@ def download_video(url, quality, download_subs, mode='video'):
                     with progress_lock:
                         progress['filename'] = os.path.basename(last_video_filename)
                 else:
-                    # Fallback search
                     title = info.get('title', 'audio')
                     safe_title = safe_filename(title)
                     files = [f for f in os.listdir(DOWNLOADS_DIR) if f.startswith(safe_title) and f.endswith('.mp3')]
@@ -153,14 +146,12 @@ def download_video(url, quality, download_subs, mode='video'):
                     else:
                         last_video_filename = None
         else:
-            # Video mode with quality fallback
             requested_int = None
             try:
                 requested_int = int(quality) if quality is not None else None
             except Exception:
                 requested_int = None
 
-            # Probe available formats
             with yt_dlp.YoutubeDL(probe_opts) as ydl_probe:
                 info = ydl_probe.extract_info(url, download=False)
 
@@ -174,17 +165,14 @@ def download_video(url, quality, download_subs, mode='video'):
                         chosen_height = h
                         break
 
-            # If nothing <= requested was found, fallback to highest available
             if chosen_height is None and available_heights:
                 chosen_height = available_heights[0]
 
-            # Build final format selector
             if chosen_height:
                 format_selector = f"bestvideo[height<={chosen_height}]+bestaudio/best[height<={chosen_height}]"
             else:
                 format_selector = 'bestvideo+bestaudio/best'
 
-            # Build final ydl options
             ydl_opts = base_opts.copy()
             ydl_opts['format'] = format_selector
 
@@ -196,15 +184,12 @@ def download_video(url, quality, download_subs, mode='video'):
                     'embedsubtitles': True,
                 })
 
-            # Update progress with selection
             with progress_lock:
                 progress['quality_used'] = str(chosen_height) if chosen_height else 'best'
                 progress['status'] = f"Selected quality: {progress['quality_used']}p (requested: {quality})"
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
-
-                # Directly retrieve the true path yt-dlp generated to prevent filename mismatch 404s
                 actual_filename = ydl.prepare_filename(info)
                 video_filename = os.path.splitext(actual_filename)[0] + '.mp4'
 
@@ -213,7 +198,6 @@ def download_video(url, quality, download_subs, mode='video'):
                     with progress_lock:
                         progress['filename'] = os.path.basename(last_video_filename)
                 else:
-                    # Secondary structural string checking pattern if path resolves slightly differently
                     title = info.get('title', 'video')
                     safe_title = safe_filename(title)
                     files = [f for f in os.listdir(DOWNLOADS_DIR) if f.startswith(safe_title) and f.endswith('.mp4')]
@@ -240,20 +224,11 @@ def download_video(url, quality, download_subs, mode='video'):
 @app.route("/", methods=["GET", "POST"])
 def index():
     if request.method == "POST":
-        print("POST request received")  # Debug
-        print("Form data:", request.form)
-
         url = request.form.get("url")
         quality = request.form.get("quality")
         download_subs = request.form.get("subs") is not None
         mode = request.form.get("mode", "video")
 
-        print("URL:", url)
-        print("Quality:", quality)
-        print("Download Subs:", download_subs)
-        print("Mode:", mode)
-
-        # Reset progress tracker context
         with progress_lock:
             progress['status'] = 'Starting...'
             progress['percent'] = 0
@@ -264,9 +239,7 @@ def index():
             progress['filename'] = None
             progress['mode'] = mode
 
-        # Fire worker download thread - execution parameters are now fully clean
         threading.Thread(target=download_video, args=(url, quality, download_subs, mode), daemon=True).start()
-
         return render_template("progress.html")
 
     return render_template("index.html")
@@ -278,9 +251,7 @@ def progress_status():
 
 @app.route("/download/<path:filename>")
 def download_file(filename):
-    # Securely point to the file directly inside your downloads directory
     target_file = os.path.join(DOWNLOADS_DIR, filename)
-    
     if os.path.exists(target_file):
         return send_file(target_file, as_attachment=True)
     else:
@@ -288,13 +259,7 @@ def download_file(filename):
 
 if __name__ == "__main__":
     os.makedirs(DOWNLOADS_DIR, exist_ok=True)
-    
-    # Only try to open Termux browser if running locally inside Termux
     if os.path.exists('/data/data/com.termux'):
         os.system("termux-open-url http://127.0.0.1:5000/")
-    
-    # Dynamically bind to the cloud provider's port, or default to 5000 locally
     port = int(os.environ.get("PORT", 5000))
-    
-    # debug=True can cause threading/hook loops on some production platforms
     app.run(host="0.0.0.0", port=port, debug=False)
