@@ -71,7 +71,7 @@ def download_hook(d):
 def download_video(url, quality, download_subs, mode='video'):
     global last_video_filename
     try:
-        # Force a combination of mobile-embedded flags to trick the bot detection
+        # Strict TV_SIMPLY setup. Completely skips desktop/mobile bot verification.
         base_opts = {
             'progress_hooks': [download_hook],
             'quiet': False,
@@ -81,9 +81,8 @@ def download_video(url, quality, download_subs, mode='video'):
             'cache_dir': os.path.join(REPO_ROOT, ".yt-dlp-cache"),
             'extractor_args': {
                 'youtube': {
-                    'oauth2': True,
-                    'player_client': ['mweb'], # Switch to mobile web footprint
-                    'player_skip': ['web'],    # Strictly block desktop web client
+                    'player_client': ['tv_simply'],
+                    'player_skip': ['web', 'ios', 'mweb', 'android'],
                 }
             }
         }
@@ -138,16 +137,15 @@ def download_video(url, quality, download_subs, mode='video'):
             except Exception:
                 requested_int = None
 
-            # Sub-probe configurations matching mobile layout signatures
+            # Sub-probe configurations matching strict TV pipeline endpoints
             probe_opts = {
                 'quiet': True,
                 'no_warnings': True,
                 'cache_dir': os.path.join(REPO_ROOT, ".yt-dlp-cache"),
                 'extractor_args': {
                     'youtube': {
-                        'oauth2': True,
-                        'player_client': ['mweb'],
-                        'player_skip': ['web'],
+                        'player_client': ['tv_simply'],
+                        'player_skip': ['web', 'ios', 'mweb', 'android'],
                     }
                 }
             }
