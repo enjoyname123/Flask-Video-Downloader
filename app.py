@@ -24,21 +24,29 @@ progress = {
     'mode': 'video'
 }
 
-
 def get_effective_cookies_path(form_path=None):
-    if form_path:
-        form_path = os.path.expanduser(form_path)
-        if os.path.exists(form_path):
-            return form_path
+    # 1. ALWAYS check the GitHub repository first for committed cookies
+    if os.path.exists(COOKIES_PATH):
+        print(f"--> Using Primary Repository Cookies: {COOKIES_PATH}")
+        return COOKIES_PATH
+        
+    if os.path.exists(FALLBACK_COOKIES_PATH):
+        print(f"--> Using Fallback Repository Cookies: {FALLBACK_COOKIES_PATH}")
+        return FALLBACK_COOKIES_PATH
+
+    # 2. Check Environment Variables next
     env_path = os.environ.get('YT_DLP_COOKIES_PATH')
     if env_path:
         env_path = os.path.expanduser(env_path)
         if os.path.exists(env_path):
             return env_path
-    if os.path.exists(COOKIES_PATH):
-        return COOKIES_PATH
-    if os.path.exists(FALLBACK_COOKIES_PATH):
-        return FALLBACK_COOKIES_PATH
+
+    # 3. Use the form path ONLY if repository files don't exist
+    if form_path and str(form_path).strip():
+        form_path = os.path.expanduser(form_path)
+        if os.path.exists(form_path):
+            return form_path
+
     return None
 
 progress_lock = threading.Lock()
