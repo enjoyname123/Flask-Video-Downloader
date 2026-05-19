@@ -9,9 +9,6 @@ app = Flask(__name__)
 REPO_ROOT = os.path.abspath(os.path.dirname(__file__))
 DOWNLOADS_DIR = os.path.join(REPO_ROOT, "downloads") 
 
-# Path where your persistent YouTube token will be cached on Render
-TOKEN_CACHE_FILE = os.path.join(REPO_ROOT, "youtube_oauth2.cache")
-
 progress = {
     'status': 'Waiting...',
     'percent': 0,
@@ -29,7 +26,7 @@ last_video_filename = None
 def safe_filename(filename):
     value = unicodedata.normalize('NFKD', filename).encode('ascii', 'ignore').decode('ascii')
     value = str(re.sub(r'[^A-Za-z0-9_.-]', '_', value))
-    return value[:100]
+    return value[:100]  # Limit length for filesystem safety
 
 def download_hook(d):
     with progress_lock:
@@ -74,18 +71,18 @@ def download_hook(d):
 def download_video(url, quality, download_subs, mode='video'):
     global last_video_filename
     try:
-        # Base setup relying on native OAuth2 protocol handling
+        # Core configuration forcing OAuth2 over the embedded web client profile
         base_opts = {
             'progress_hooks': [download_hook],
             'quiet': False,
             'no_warnings': False,
             'progress_with_newline': False,
             'ignoreerrors': True,
-            'cache_dir': REPO_ROOT,
+            'cache_dir': os.path.join(REPO_ROOT, ".yt-dlp-cache"),
             'extractor_args': {
                 'youtube': {
                     'oauth2': True,
-                    'player_client': ['web', 'tv'],
+                    'player_client': ['web_embedded'],
                 }
             }
         }
@@ -140,11 +137,17 @@ def download_video(url, quality, download_subs, mode='video'):
             except Exception:
                 requested_int = None
 
-            # Probe formats using OAuth2 properties
+            # Sub-probe configurations matching identical profile fingerprints
             probe_opts = {
                 'quiet': True,
                 'no_warnings': True,
-                'extractor_args': {'youtube': {'oauth2': True}}
+                'cache_dir': os.path.join(REPO_ROOT, ".yt-dlp-cache"),
+                'extractor_args': {
+                    'youtube': {
+                        'oauth2': True,
+                        'player_client': ['web_embedded'],
+                    }
+                }
             }
             with yt_dlp.YoutubeDL(probe_opts) as ydl_probe:
                 info = ydl_probe.extract_info(url, download=False)
@@ -253,5 +256,7 @@ def download_file(filename):
 
 if __name__ == "__main__":
     os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+    if os.path.exists('/data/data/com.termux'):
+        os.system("termux-open-url http://127.0.0.1:5000/")
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
