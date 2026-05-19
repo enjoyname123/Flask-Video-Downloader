@@ -9,9 +9,6 @@ app = Flask(__name__)
 REPO_ROOT = os.path.abspath(os.path.dirname(__file__))
 # Creates a 'downloads' folder right inside your project directory
 DOWNLOADS_DIR = os.path.join(REPO_ROOT, "downloads") 
-COOKIES_PATH = os.path.join(REPO_ROOT, 'cookies.txt')
-# Fallback looks inside your project directory instead of an Android system path
-FALLBACK_COOKIES_PATH = os.path.join(REPO_ROOT, 'fallback_cookies.txt')
 
 progress = {
     'status': 'Waiting...',
@@ -23,31 +20,6 @@ progress = {
     'filename': None,
     'mode': 'video'
 }
-
-def get_effective_cookies_path(form_path=None):
-    # 1. ALWAYS check the GitHub repository first for committed cookies
-    if os.path.exists(COOKIES_PATH):
-        print(f"--> Using Primary Repository Cookies: {COOKIES_PATH}")
-        return COOKIES_PATH
-        
-    if os.path.exists(FALLBACK_COOKIES_PATH):
-        print(f"--> Using Fallback Repository Cookies: {FALLBACK_COOKIES_PATH}")
-        return FALLBACK_COOKIES_PATH
-
-    # 2. Check Environment Variables next
-    env_path = os.environ.get('YT_DLP_COOKIES_PATH')
-    if env_path:
-        env_path = os.path.expanduser(env_path)
-        if os.path.exists(env_path):
-            return env_path
-
-    # 3. Use the form path ONLY if repository files don't exist
-    if form_path and str(form_path).strip():
-        form_path = os.path.expanduser(form_path)
-        if os.path.exists(form_path):
-            return form_path
-
-    return None
 
 progress_lock = threading.Lock()
 last_video_filename = None
@@ -97,15 +69,18 @@ def download_hook(d):
             progress['status'] = f"Error in hook: {e}"
             progress['done'] = True
 
-def download_video(url, quality, download_subs, mode='video', cookies_path=None):
+def download_video(url, quality, download_subs, mode='video'):
     global last_video_filename
     try:
-        effective_cookies = get_effective_cookies_path(cookies_path)
-
-        # Prepare options used for probing formats and for final download
+        # Client spoofing options designed to emulate systems that do not use web cookies
         probe_opts = {
             'quiet': True,
             'no_warnings': True,
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android_tv_embedded', 'web_safari']
+                }
+            }
         }
 
         base_opts = {
@@ -114,15 +89,16 @@ def download_video(url, quality, download_subs, mode='video', cookies_path=None)
             'no_warnings': False,
             'progress_with_newline': False,
             'ignoreerrors': True,
-            # JS and Challenge Unscrambling engines
             'remote_components': 'ejs:github',
             'javascript_runtimes': ['node'],
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android_tv_embedded', 'web_safari']
+                }
+            }
         }
 
         # Set output format based on mode
-        if effective_cookies:
-            base_opts['cookies'] = effective_cookies
-
         if mode == 'audio':
             base_opts['outtmpl'] = os.path.join(DOWNLOADS_DIR, '%(title)s.%(ext)s')
             base_opts['format'] = 'bestaudio/best'
@@ -149,21 +125,9 @@ def download_video(url, quality, download_subs, mode='video', cookies_path=None)
                 progress['quality_used'] = 'Best Available'
                 progress['status'] = 'Extracting best audio...'
 
-            if effective_cookies:
-                base_opts['cookies'] = effective_cookies
-
-            if download_subs:
-                base_opts.update({
-                    'writesubtitles': True,
-                    'writeautomaticsub': True,
-                    'subtitleslangs': ['en.*'],
-                    'embedsubtitles': True,
-                })
-
             with yt_dlp.YoutubeDL(base_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
                 actual_filename = ydl.prepare_filename(info)
-                # For audio, the file will be .mp3 after postprocessing
                 audio_filename = os.path.splitext(actual_filename)[0] + '.mp3'
 
                 if os.path.exists(audio_filename):
@@ -183,7 +147,6 @@ def download_video(url, quality, download_subs, mode='video', cookies_path=None)
                         last_video_filename = None
         else:
             # Video mode with quality fallback
-            # Determine numeric requested quality when possible
             requested_int = None
             try:
                 requested_int = int(quality) if quality is not None else None
@@ -191,10 +154,7 @@ def download_video(url, quality, download_subs, mode='video', cookies_path=None)
                 requested_int = None
 
             # Probe available formats
-            probe_opts_local = probe_opts.copy()
-            if effective_cookies:
-                probe_opts_local['cookies'] = effective_cookies
-            with yt_dlp.YoutubeDL(probe_opts_local) as ydl_probe:
+            with yt_dlp.YoutubeDL(probe_opts) as ydl_probe:
                 info = ydl_probe.extract_info(url, download=False)
 
             formats = info.get('formats', []) if info else []
@@ -220,8 +180,6 @@ def download_video(url, quality, download_subs, mode='video', cookies_path=None)
             # Build final ydl options
             ydl_opts = base_opts.copy()
             ydl_opts['format'] = format_selector
-            if effective_cookies:
-                ydl_opts['cookies'] = effective_cookies
 
             if download_subs:
                 ydl_opts.update({
@@ -264,20 +222,13 @@ def download_video(url, quality, download_subs, mode='video', cookies_path=None)
             progress['percent'] = 100
             progress['done'] = True
             progress['error'] = ''
-            # ensure filename is reported
             if last_video_filename:
                 progress['filename'] = os.path.basename(last_video_filename)
     except Exception as e:
-        message = str(e)
-        if 'Sign in to confirm you’re not a bot' in message or 'Sign in to confirm you are not a bot' in message:
-            message = (
-                'YouTube requires cookies for this video. Export a valid cookies.txt file from your browser and paste its full path in the form, or set YT_DLP_COOKIES_PATH. '
-                'See https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies'
-            )
         with progress_lock:
             progress['status'] = "Error"
             progress['done'] = True
-            progress['error'] = message
+            progress['error'] = str(e)
 
 @app.route("/", methods=["GET", "POST"])
 def index():
@@ -289,7 +240,6 @@ def index():
         quality = request.form.get("quality")
         download_subs = request.form.get("subs") is not None
         mode = request.form.get("mode", "video")
-        cookies_path = request.form.get("cookies")
 
         print("URL:", url)
         print("Quality:", quality)
@@ -307,8 +257,8 @@ def index():
             progress['filename'] = None
             progress['mode'] = mode
 
-        # Fire worker download thread
-        threading.Thread(target=download_video, args=(url, quality, download_subs, mode, cookies_path), daemon=True).start()
+        # Fire worker download thread - execution parameters are now fully clean
+        threading.Thread(target=download_video, args=(url, quality, download_subs, mode), daemon=True).start()
 
         return render_template("progress.html")
 
@@ -339,6 +289,5 @@ if __name__ == "__main__":
     # Dynamically bind to the cloud provider's port, or default to 5000 locally
     port = int(os.environ.get("PORT", 5000))
     
-    # debug=True can cause threading/hook loops on some production platforms; 
-    # turn it off if you encounter strange background issues on Render.
+    # debug=True can cause threading/hook loops on some production platforms
     app.run(host="0.0.0.0", port=port, debug=False)
