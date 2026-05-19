@@ -9,6 +9,9 @@ app = Flask(__name__)
 REPO_ROOT = os.path.abspath(os.path.dirname(__file__))
 DOWNLOADS_DIR = os.path.join(REPO_ROOT, "downloads") 
 
+# Path where your persistent YouTube token will be cached on Render
+TOKEN_CACHE_FILE = os.path.join(REPO_ROOT, "youtube_oauth2.cache")
+
 progress = {
     'status': 'Waiting...',
     'percent': 0,
@@ -26,7 +29,7 @@ last_video_filename = None
 def safe_filename(filename):
     value = unicodedata.normalize('NFKD', filename).encode('ascii', 'ignore').decode('ascii')
     value = str(re.sub(r'[^A-Za-z0-9_.-]', '_', value))
-    return value[:100]  # Limit length for filesystem safety
+    return value[:100]
 
 def download_hook(d):
     with progress_lock:
@@ -71,37 +74,22 @@ def download_hook(d):
 def download_video(url, quality, download_subs, mode='video'):
     global last_video_filename
     try:
-        # Implements modern client impersonation mimicking official mobile hardware API streams
-        probe_opts = {
-            'quiet': True,
-            'no_warnings': True,
-            'impersonate': 'safari-ios',  # High priority native iOS networking signature
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['ios'],
-                    'skip': ['authcheck']
-                }
-            }
-        }
-
+        # Base setup relying on native OAuth2 protocol handling
         base_opts = {
             'progress_hooks': [download_hook],
             'quiet': False,
             'no_warnings': False,
             'progress_with_newline': False,
             'ignoreerrors': True,
-            'remote_components': 'ejs:github',
-            'javascript_runtimes': ['node'],
-            'impersonate': 'safari-ios',  # Match the iOS network handshake
+            'cache_dir': REPO_ROOT,
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['ios'],
-                    'skip': ['authcheck']
+                    'oauth2': True,
+                    'player_client': ['web', 'tv'],
                 }
             }
         }
 
-        # Set output format based on mode
         if mode == 'audio':
             base_opts['outtmpl'] = os.path.join(DOWNLOADS_DIR, '%(title)s.%(ext)s')
             base_opts['format'] = 'bestaudio/best'
@@ -152,6 +140,12 @@ def download_video(url, quality, download_subs, mode='video'):
             except Exception:
                 requested_int = None
 
+            # Probe formats using OAuth2 properties
+            probe_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'extractor_args': {'youtube': {'oauth2': True}}
+            }
             with yt_dlp.YoutubeDL(probe_opts) as ydl_probe:
                 info = ydl_probe.extract_info(url, download=False)
 
@@ -259,7 +253,5 @@ def download_file(filename):
 
 if __name__ == "__main__":
     os.makedirs(DOWNLOADS_DIR, exist_ok=True)
-    if os.path.exists('/data/data/com.termux'):
-        os.system("termux-open-url http://127.0.0.1:5000/")
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
