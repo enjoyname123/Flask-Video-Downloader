@@ -108,15 +108,20 @@ def download_video(url, quality, download_subs, mode='video', cookies_path=None)
             'no_warnings': True,
         }
 
+        # Force strict authenticated OAuth2 using a localized token file
         base_opts = {
             'progress_hooks': [download_hook],
             'quiet': False,
             'no_warnings': False,
             'progress_with_newline': False,
             'ignoreerrors': True,
-            # JS and Challenge Unscrambling engines
-            'remote_components': 'ejs:github',
-            'javascript_runtimes': ['node'],
+            'cache_dir': os.path.join(REPO_ROOT, ".yt-dlp-cache"),
+            'extractor_args': {
+                'youtube': {
+                    'oauth2': True,
+                    'oauth2_token_file': os.path.join(REPO_ROOT, "youtube_oauth.json") # Force the token path
+                }
+            }
         }
 
         # Set output format based on mode
