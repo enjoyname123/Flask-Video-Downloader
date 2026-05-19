@@ -7,9 +7,11 @@ import yt_dlp
 
 app = Flask(__name__)
 REPO_ROOT = os.path.abspath(os.path.dirname(__file__))
-DOWNLOADS_DIR = os.path.expanduser("~/storage/shared/downloads")
+# Creates a 'downloads' folder right inside your project directory
+DOWNLOADS_DIR = os.path.join(REPO_ROOT, "downloads") 
 COOKIES_PATH = os.path.join(REPO_ROOT, 'cookies.txt')
-FALLBACK_COOKIES_PATH = os.path.expanduser("~/storage/shared/cookies.txt")
+# Fallback looks inside your project directory instead of an Android system path
+FALLBACK_COOKIES_PATH = os.path.join(REPO_ROOT, 'fallback_cookies.txt')
 
 progress = {
     'status': 'Waiting...',
@@ -309,19 +311,26 @@ def progress_status():
     with progress_lock:
         return jsonify(progress)
 
-@app.route("/download")
-def download_file():
-    global last_video_filename
-    if last_video_filename and os.path.exists(last_video_filename):
-        return send_file(last_video_filename, as_attachment=True)
+@app.route("/download/<path:filename>")
+def download_file(filename):
+    # Securely point to the file directly inside your downloads directory
+    target_file = os.path.join(DOWNLOADS_DIR, filename)
+    
+    if os.path.exists(target_file):
+        return send_file(target_file, as_attachment=True)
     else:
-        return "File not available or not found.", 404
+        return f"File '{filename}' not found on the server.", 404
 
 if __name__ == "__main__":
     os.makedirs(DOWNLOADS_DIR, exist_ok=True)
-    os.system("termux-open-url http://127.0.0.1:5000/")
-    app.run(debug=True, host="0.0.0.0", port=5000)
-import os
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    
+    # Only try to open Termux browser if running locally inside Termux
+    if os.path.exists('/data/data/com.termux'):
+        os.system("termux-open-url http://127.0.0.1:5000/")
+    
+    # Dynamically bind to the cloud provider's port, or default to 5000 locally
+    port = int(os.environ.get("PORT", 5000))
+    
+    # debug=True can cause threading/hook loops on some production platforms; 
+    # turn it off if you encounter strange background issues on Render.
+    app.run(host="0.0.0.0", port=port, debug=False)
