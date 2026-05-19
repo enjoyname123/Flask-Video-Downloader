@@ -7,10 +7,8 @@ import yt_dlp
 
 app = Flask(__name__)
 REPO_ROOT = os.path.abspath(os.path.dirname(__file__))
-# Creates a 'downloads' folder right inside your project directory
 DOWNLOADS_DIR = os.path.join(REPO_ROOT, "downloads") 
 COOKIES_PATH = os.path.join(REPO_ROOT, 'cookies.txt')
-# Fallback looks inside your project directory instead of an Android system path
 FALLBACK_COOKIES_PATH = os.path.join(REPO_ROOT, 'fallback_cookies.txt')
 
 progress = {
@@ -25,7 +23,6 @@ progress = {
 }
 
 def get_effective_cookies_path(form_path=None):
-    # 1. ALWAYS check the GitHub repository first for committed cookies
     if os.path.exists(COOKIES_PATH):
         print(f"--> Using Primary Repository Cookies: {COOKIES_PATH}")
         return COOKIES_PATH
@@ -34,14 +31,12 @@ def get_effective_cookies_path(form_path=None):
         print(f"--> Using Fallback Repository Cookies: {FALLBACK_COOKIES_PATH}")
         return FALLBACK_COOKIES_PATH
 
-    # 2. Check Environment Variables next
     env_path = os.environ.get('YT_DLP_COOKIES_PATH')
     if env_path:
         env_path = os.path.expanduser(env_path)
         if os.path.exists(env_path):
             return env_path
 
-    # 3. Use the form path ONLY if repository files don't exist
     if form_path and str(form_path).strip():
         form_path = os.path.expanduser(form_path)
         if os.path.exists(form_path):
@@ -102,13 +97,7 @@ def download_video(url, quality, download_subs, mode='video', cookies_path=None)
     try:
         effective_cookies = get_effective_cookies_path(cookies_path)
 
-        # Prepare options used for probing formats and for final download
-        probe_opts = {
-            'quiet': True,
-            'no_warnings': True,
-        }
-
-        # Force strict authenticated OAuth2 using a localized token file
+        # High-compatibility mobile safari footprint that skips PO Token enforcement
         base_opts = {
             'progress_hooks': [download_hook],
             'quiet': False,
@@ -118,57 +107,50 @@ def download_video(url, quality, download_subs, mode='video', cookies_path=None)
             'cache_dir': os.path.join(REPO_ROOT, ".yt-dlp-cache"),
             'extractor_args': {
                 'youtube': {
-                    'oauth2': True,
-                    'oauth2_token_file': os.path.join(REPO_ROOT, "youtube_oauth.json") # Force the token path
+                    'player_client': ['web_safari'],
+                    'player_skip': ['web', 'ios', 'mweb', 'android', 'tv'],
                 }
+            },
+            # Inject generic, safe HTTP headers to mirror a real device completely
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Sec-Fetch-Mode': 'navigate',
             }
         }
 
-        # Set output format based on mode
+        # Apply cookies if available using correct API parameter
         if effective_cookies:
-            base_opts['cookies'] = effective_cookies
+            base_opts['cookiefile'] = effective_cookies
 
         if mode == 'audio':
-            base_opts['outtmpl'] = os.path.join(DOWNLOADS_DIR, '%(title)s.%(ext)s')
+            base_opts['outtmpl'] = os.path.join(DOWNLOADS_DIR, '%%(title)s.%%(ext)s')
             base_opts['format'] = 'bestaudio/best'
             base_opts['postprocessors'] = [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
                 'preferredquality': '192',
             }]
-            download_subs = False  # No subtitles for audio
+            download_subs = False  
         else:
             base_opts['outtmpl'] = os.path.join(DOWNLOADS_DIR, '%(title)s.%(ext)s')
             base_opts['merge_output_format'] = 'mp4'
 
-        # Record requested quality in progress
         with progress_lock:
             progress['quality_requested'] = quality
             progress['mode'] = mode
 
         os.makedirs(DOWNLOADS_DIR, exist_ok=True)
 
-        # For audio mode, skip quality selection (not applicable)
         if mode == 'audio':
             with progress_lock:
                 progress['quality_used'] = 'Best Available'
                 progress['status'] = 'Extracting best audio...'
 
-            if effective_cookies:
-                base_opts['cookies'] = effective_cookies
-
-            if download_subs:
-                base_opts.update({
-                    'writesubtitles': True,
-                    'writeautomaticsub': True,
-                    'subtitleslangs': ['en.*'],
-                    'embedsubtitles': True,
-                })
-
             with yt_dlp.YoutubeDL(base_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
                 actual_filename = ydl.prepare_filename(info)
-                # For audio, the file will be .mp3 after postprocessing
                 audio_filename = os.path.splitext(actual_filename)[0] + '.mp3'
 
                 if os.path.exists(audio_filename):
@@ -176,7 +158,6 @@ def download_video(url, quality, download_subs, mode='video', cookies_path=None)
                     with progress_lock:
                         progress['filename'] = os.path.basename(last_video_filename)
                 else:
-                    # Fallback search
                     title = info.get('title', 'audio')
                     safe_title = safe_filename(title)
                     files = [f for f in os.listdir(DOWNLOADS_DIR) if f.startswith(safe_title) and f.endswith('.mp3')]
@@ -187,19 +168,30 @@ def download_video(url, quality, download_subs, mode='video', cookies_path=None)
                     else:
                         last_video_filename = None
         else:
-            # Video mode with quality fallback
-            # Determine numeric requested quality when possible
             requested_int = None
             try:
                 requested_int = int(quality) if quality is not None else None
             except Exception:
                 requested_int = None
 
-            # Probe available formats
-            probe_opts_local = probe_opts.copy()
+            # Explicit sub-probe matching the exact same network footprint
+            probe_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'cache_dir': os.path.join(REPO_ROOT, ".yt-dlp-cache"),
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['web_safari'],
+                        'player_skip': ['web', 'ios', 'mweb', 'android', 'tv'],
+                    }
+                },
+                'http_headers': base_opts['http_headers']
+            }
+            
             if effective_cookies:
-                probe_opts_local['cookies'] = effective_cookies
-            with yt_dlp.YoutubeDL(probe_opts_local) as ydl_probe:
+                probe_opts['cookiefile'] = effective_cookies
+
+            with yt_dlp.YoutubeDL(probe_opts) as ydl_probe:
                 info = ydl_probe.extract_info(url, download=False)
 
             formats = info.get('formats', []) if info else []
@@ -212,21 +204,16 @@ def download_video(url, quality, download_subs, mode='video', cookies_path=None)
                         chosen_height = h
                         break
 
-            # If nothing <= requested was found, fallback to highest available
             if chosen_height is None and available_heights:
                 chosen_height = available_heights[0]
 
-            # Build final format selector
             if chosen_height:
                 format_selector = f"bestvideo[height<={chosen_height}]+bestaudio/best[height<={chosen_height}]"
             else:
                 format_selector = 'bestvideo+bestaudio/best'
 
-            # Build final ydl options
             ydl_opts = base_opts.copy()
             ydl_opts['format'] = format_selector
-            if effective_cookies:
-                ydl_opts['cookies'] = effective_cookies
 
             if download_subs:
                 ydl_opts.update({
@@ -236,15 +223,12 @@ def download_video(url, quality, download_subs, mode='video', cookies_path=None)
                     'embedsubtitles': True,
                 })
 
-            # Update progress with selection
             with progress_lock:
                 progress['quality_used'] = str(chosen_height) if chosen_height else 'best'
                 progress['status'] = f"Selected quality: {progress['quality_used']}p (requested: {quality})"
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
-
-                # Directly retrieve the true path yt-dlp generated to prevent filename mismatch 404s
                 actual_filename = ydl.prepare_filename(info)
                 video_filename = os.path.splitext(actual_filename)[0] + '.mp4'
 
@@ -253,7 +237,6 @@ def download_video(url, quality, download_subs, mode='video', cookies_path=None)
                     with progress_lock:
                         progress['filename'] = os.path.basename(last_video_filename)
                 else:
-                    # Secondary structural string checking pattern if path resolves slightly differently
                     title = info.get('title', 'video')
                     safe_title = safe_filename(title)
                     files = [f for f in os.listdir(DOWNLOADS_DIR) if f.startswith(safe_title) and f.endswith('.mp4')]
@@ -269,39 +252,24 @@ def download_video(url, quality, download_subs, mode='video', cookies_path=None)
             progress['percent'] = 100
             progress['done'] = True
             progress['error'] = ''
-            # ensure filename is reported
             if last_video_filename:
                 progress['filename'] = os.path.basename(last_video_filename)
     except Exception as e:
-        message = str(e)
-        if 'Sign in to confirm you’re not a bot' in message or 'Sign in to confirm you are not a bot' in message:
-            message = (
-                'YouTube requires cookies for this video. Export a valid cookies.txt file from your browser and paste its full path in the form, or set YT_DLP_COOKIES_PATH. '
-                'See https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies'
-            )
         with progress_lock:
             progress['status'] = "Error"
             progress['done'] = True
-            progress['error'] = message
+            progress['error'] = str(e)
+            
 
 @app.route("/", methods=["GET", "POST"])
 def index():
     if request.method == "POST":
-        print("POST request received")  # Debug
-        print("Form data:", request.form)
-
         url = request.form.get("url")
         quality = request.form.get("quality")
         download_subs = request.form.get("subs") is not None
         mode = request.form.get("mode", "video")
         cookies_path = request.form.get("cookies")
 
-        print("URL:", url)
-        print("Quality:", quality)
-        print("Download Subs:", download_subs)
-        print("Mode:", mode)
-
-        # Reset progress tracker context
         with progress_lock:
             progress['status'] = 'Starting...'
             progress['percent'] = 0
@@ -312,9 +280,7 @@ def index():
             progress['filename'] = None
             progress['mode'] = mode
 
-        # Fire worker download thread
         threading.Thread(target=download_video, args=(url, quality, download_subs, mode, cookies_path), daemon=True).start()
-
         return render_template("progress.html")
 
     return render_template("index.html")
@@ -326,9 +292,7 @@ def progress_status():
 
 @app.route("/download/<path:filename>")
 def download_file(filename):
-    # Securely point to the file directly inside your downloads directory
     target_file = os.path.join(DOWNLOADS_DIR, filename)
-    
     if os.path.exists(target_file):
         return send_file(target_file, as_attachment=True)
     else:
@@ -336,14 +300,7 @@ def download_file(filename):
 
 if __name__ == "__main__":
     os.makedirs(DOWNLOADS_DIR, exist_ok=True)
-    
-    # Only try to open Termux browser if running locally inside Termux
     if os.path.exists('/data/data/com.termux'):
         os.system("termux-open-url http://127.0.0.1:5000/")
-    
-    # Dynamically bind to the cloud provider's port, or default to 5000 locally
     port = int(os.environ.get("PORT", 5000))
-    
-    # debug=True can cause threading/hook loops on some production platforms; 
-    # turn it off if you encounter strange background issues on Render.
     app.run(host="0.0.0.0", port=port, debug=False)
