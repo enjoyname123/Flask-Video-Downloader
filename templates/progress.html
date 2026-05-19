@@ -114,7 +114,7 @@
       top:0;
       bottom:0;
       width:20px;
-      background:linear-gradient(90deg,transparent,rgba(255,255,255,0.5));
+      background:linear-gradient(90deg,transparent,rgba(255,255,255,0.3));
       filter:blur(2px);
     }
     
@@ -329,7 +329,7 @@
 
       <div id="err" class="error-msg"></div>
 
-      <a id="dl" class="cta" href="/download">✓ Download Your File</a>
+      <a id="dl" class="cta" href="#">✓ Download Your File</a>
     </div>
   </div>
 
@@ -377,7 +377,8 @@
           document.getElementById('fname').innerText=data.filename;
           const d=document.getElementById('dl');
           d.style.display='block';
-          d.href='/download';
+          // Dynamically routes to the filename-encoded parameter endpoint
+          d.href='/download/'+encodeURIComponent(data.filename);
         }
         
         if(data.error){
@@ -399,3 +400,4 @@
     window.addEventListener('load',updateProgress);
   </script>
 </body>
+</html>
