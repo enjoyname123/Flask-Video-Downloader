@@ -8,6 +8,8 @@ import yt_dlp
 app = Flask(__name__)
 REPO_ROOT = os.path.abspath(os.path.dirname(__file__))
 DOWNLOADS_DIR = os.path.join(REPO_ROOT, "downloads") 
+COOKIES_PATH = os.path.join(REPO_ROOT, 'cookies.txt')
+FALLBACK_COOKIES_PATH = os.path.join(REPO_ROOT, 'fallback_cookies.txt')
 
 progress = {
     'status': 'Waiting...',
@@ -19,6 +21,28 @@ progress = {
     'filename': None,
     'mode': 'video'
 }
+
+def get_effective_cookies_path(form_path=None):
+    if os.path.exists(COOKIES_PATH):
+        print(f"--> Using Primary Repository Cookies: {COOKIES_PATH}")
+        return COOKIES_PATH
+        
+    if os.path.exists(FALLBACK_COOKIES_PATH):
+        print(f"--> Using Fallback Repository Cookies: {FALLBACK_COOKIES_PATH}")
+        return FALLBACK_COOKIES_PATH
+
+    env_path = os.environ.get('YT_DLP_COOKIES_PATH')
+    if env_path:
+        env_path = os.path.expanduser(env_path)
+        if os.path.exists(env_path):
+            return env_path
+
+    if form_path and str(form_path).strip():
+        form_path = os.path.expanduser(form_path)
+        if os.path.exists(form_path):
+            return form_path
+
+    return None
 
 progress_lock = threading.Lock()
 last_video_filename = None
@@ -68,9 +92,11 @@ def download_hook(d):
             progress['status'] = f"Error in hook: {e}"
             progress['done'] = True
 
-def download_video(url, quality, download_subs, mode='video'):
+def download_video(url, quality, download_subs, mode='video', cookies_path=None):
     global last_video_filename
     try:
+        effective_cookies = get_effective_cookies_path(cookies_path)
+
         # High-compatibility mobile safari footprint that skips PO Token enforcement
         base_opts = {
             'progress_hooks': [download_hook],
@@ -94,8 +120,12 @@ def download_video(url, quality, download_subs, mode='video'):
             }
         }
 
+        # Apply cookies if available using correct API parameter
+        if effective_cookies:
+            base_opts['cookiefile'] = effective_cookies
+
         if mode == 'audio':
-            base_opts['outtmpl'] = os.path.join(DOWNLOADS_DIR, '%(title)s.%(ext)s')
+            base_opts['outtmpl'] = os.path.join(DOWNLOADS_DIR, '%%(title)s.%%(ext)s')
             base_opts['format'] = 'bestaudio/best'
             base_opts['postprocessors'] = [{
                 'key': 'FFmpegExtractAudio',
@@ -157,6 +187,10 @@ def download_video(url, quality, download_subs, mode='video'):
                 },
                 'http_headers': base_opts['http_headers']
             }
+            
+            if effective_cookies:
+                probe_opts['cookiefile'] = effective_cookies
+
             with yt_dlp.YoutubeDL(probe_opts) as ydl_probe:
                 info = ydl_probe.extract_info(url, download=False)
 
@@ -234,6 +268,7 @@ def index():
         quality = request.form.get("quality")
         download_subs = request.form.get("subs") is not None
         mode = request.form.get("mode", "video")
+        cookies_path = request.form.get("cookies")
 
         with progress_lock:
             progress['status'] = 'Starting...'
@@ -245,7 +280,7 @@ def index():
             progress['filename'] = None
             progress['mode'] = mode
 
-        threading.Thread(target=download_video, args=(url, quality, download_subs, mode), daemon=True).start()
+        threading.Thread(target=download_video, args=(url, quality, download_subs, mode, cookies_path), daemon=True).start()
         return render_template("progress.html")
 
     return render_template("index.html")
